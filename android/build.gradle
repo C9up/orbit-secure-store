@@ -1,0 +1,44 @@
+// @c9up/orbit-secure-store's Android module: a Kotlin TurboModule over the
+// Android Keystore and the biometric prompt. React Native's autolinking (on
+// in an app built by `ream android:*`) adds it to the app; its codegen spec
+// is specs/.
+
+def fromRoot(name, fallback) {
+    return rootProject.ext.has(name) ? rootProject.ext.get(name) : fallback
+}
+
+apply plugin: "com.android.library"
+
+// AGP 9 compiles Kotlin itself unless `android.builtInKotlin=false`.
+def agpMajor = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize(".")[0].toInteger()
+def builtInKotlin = providers.gradleProperty("android.builtInKotlin").orNull
+if (agpMajor <= 8 || (builtInKotlin != null && !builtInKotlin.toBoolean())) {
+    apply plugin: "org.jetbrains.kotlin.android"
+}
+
+apply plugin: "com.facebook.react"
+
+android {
+    namespace "com.c9up.orbit.securestore"
+    compileSdkVersion fromRoot("compileSdkVersion", 36)
+    defaultConfig {
+        minSdkVersion fromRoot("minSdkVersion", 24)
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation "com.facebook.react:react-android"
+    // The biometric prompt from API 23 (the platform's needs 28; apps start at 24).
+    implementation "androidx.biometric:biometric:1.1.0"
+}
+
+react {
+    jsRootDir = file("../specs")
+    libraryName = "OrbitSecureStoreSpec"
+    codegenJavaPackageName = "com.c9up.orbit.securestore"
+}

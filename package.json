@@ -1,0 +1,72 @@
+{
+  "name": "@c9up/orbit-secure-store",
+  "version": "0.1.0",
+  "description": "Orbit secure store — strings kept encrypted on the phone (Android Keystore), optionally behind a biometric check",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/C9up/orbit-secure-store.git"
+  },
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "react-native": "./src/index.rn.ts",
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "react-native": {
+    "./src/index.ts": "./src/index.rn.ts",
+    "./dist/index.js": "./dist/index.rn.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "biome check src/ tests/",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@types/node": "^22.20.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "typescript": "^6.0.3",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "files": [
+    "src",
+    "dist",
+    "specs",
+    "android/build.gradle",
+    "android/src",
+    "README.md",
+    "LICENSE"
+  ],
+  "codegenConfig": {
+    "name": "OrbitSecureStoreSpec",
+    "type": "modules",
+    "jsSrcsDir": "specs",
+    "android": {
+      "javaPackageName": "com.c9up.orbit.securestore"
+    }
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "react-native": "./dist/index.rn.js",
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "access": "public"
+  }
+}
