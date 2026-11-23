@@ -12,28 +12,27 @@
  * have no equivalent — a browser's storage is readable by any script on the
  * page — so here every call rejects with `E_ORBIT_SECURE_STORE_UNAVAILABLE`.
  */
+import type { Exception } from "@c9up/flare";
+import { E_ORBIT_SECURE_STORE_UNAVAILABLE } from "./errors.js";
 import {
 	type BiometricStatus,
 	checkKey,
 	type GetItemOptions,
-	OrbitSecureStoreError,
 	type SetItemOptions,
-} from "./errors.js";
+} from "./store.js";
 
-export {
-	type BiometricStatus,
-	type GetItemOptions,
-	OrbitSecureStoreError,
-	type OrbitSecureStoreErrorCode,
-	type PromptText,
-	type SetItemOptions,
-} from "./errors.js";
+export * as errors from "./errors.js";
+export type {
+	BiometricStatus,
+	GetItemOptions,
+	PromptText,
+	SetItemOptions,
+} from "./store.js";
 
-function unavailable(): OrbitSecureStoreError {
-	return new OrbitSecureStoreError(
-		"E_ORBIT_SECURE_STORE_UNAVAILABLE",
-		"[orbit-secure-store] there is no secure store outside a phone: a browser's storage is readable by every script on the page",
-	);
+function unavailable(): Exception {
+	return new E_ORBIT_SECURE_STORE_UNAVAILABLE([
+		"there is no secure store outside a phone: a browser's storage is readable by every script on the page",
+	]);
 }
 
 /** Keep `value` under `key`, encrypted. */

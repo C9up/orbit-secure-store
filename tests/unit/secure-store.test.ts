@@ -98,7 +98,9 @@ describe("on a phone", () => {
 			});
 			const store = await import("../../src/index.rn.js");
 			await store.setItem("db-key", "secret", { requireAuthentication: true });
-			await expect(store.getItem("db-key")).rejects.toMatchObject({ code });
+			const error = await store.getItem("db-key").catch((e: unknown) => e);
+			expect(error).toMatchObject({ code });
+			expect(error).toBeInstanceOf(store.errors[code]);
 		}
 	});
 

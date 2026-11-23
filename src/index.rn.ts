@@ -4,24 +4,40 @@
  * to an app built by `ream android:*`. React Native's bundler takes this file
  * in place of index.ts; it exports what index.ts exports.
  */
+import type { ErrorClass, Exception } from "@c9up/flare";
+import * as errors from "./errors.js";
 import {
 	type BiometricStatus,
 	checkKey,
 	type GetItemOptions,
-	isOrbitSecureStoreErrorCode,
-	OrbitSecureStoreError,
 	type PromptText,
 	type SetItemOptions,
-} from "./errors.js";
+} from "./store.js";
 
-export {
-	type BiometricStatus,
-	type GetItemOptions,
-	OrbitSecureStoreError,
-	type OrbitSecureStoreErrorCode,
-	type PromptText,
-	type SetItemOptions,
-} from "./errors.js";
+export * as errors from "./errors.js";
+export type {
+	BiometricStatus,
+	GetItemOptions,
+	PromptText,
+	SetItemOptions,
+} from "./store.js";
+
+/** The codes the native module rejects with, each to its error. */
+const NATIVE_CODES: ReadonlyMap<string, ErrorClass<[string]>> = new Map([
+	["E_ORBIT_SECURE_STORE_UNAVAILABLE", errors.E_ORBIT_SECURE_STORE_UNAVAILABLE],
+	["E_ORBIT_SECURE_STORE_INVALID_KEY", errors.E_ORBIT_SECURE_STORE_INVALID_KEY],
+	[
+		"E_ORBIT_SECURE_STORE_NO_BIOMETRICS",
+		errors.E_ORBIT_SECURE_STORE_NO_BIOMETRICS,
+	],
+	[
+		"E_ORBIT_SECURE_STORE_AUTH_CANCELLED",
+		errors.E_ORBIT_SECURE_STORE_AUTH_CANCELLED,
+	],
+	["E_ORBIT_SECURE_STORE_AUTH_FAILED", errors.E_ORBIT_SECURE_STORE_AUTH_FAILED],
+	["E_ORBIT_SECURE_STORE_INVALIDATED", errors.E_ORBIT_SECURE_STORE_INVALIDATED],
+	["E_ORBIT_SECURE_STORE_FAILED", errors.E_ORBIT_SECURE_STORE_FAILED],
+]);
 
 interface NativePrompt {
 	promptTitle: string;
@@ -75,10 +91,9 @@ let cached: NativeSecureStore | undefined;
 function native(): NativeSecureStore {
 	cached ??= lookup();
 	if (cached === undefined) {
-		throw new OrbitSecureStoreError(
-			"E_ORBIT_SECURE_STORE_UNAVAILABLE",
-			"[orbit-secure-store] the OrbitSecureStore module is not in the app: build it with `ream android:*`, whose autolinking adds it",
-		);
+		throw new errors.E_ORBIT_SECURE_STORE_UNAVAILABLE([
+			"the OrbitSecureStore module is not in the app: build it with `ream android:*`, whose autolinking adds it",
+		]);
 	}
 	return cached;
 }
@@ -92,16 +107,17 @@ function prompt(text: PromptText = {}): NativePrompt {
 }
 
 /** The module's rejection, under its own code (never the value). */
-function failure(error: unknown): OrbitSecureStoreError {
+function failure(error: unknown): Exception {
 	const code: unknown =
 		typeof error === "object" && error !== null
 			? Reflect.get(error, "code")
 			: undefined;
-	return new OrbitSecureStoreError(
-		isOrbitSecureStoreErrorCode(code) ? code : "E_ORBIT_SECURE_STORE_FAILED",
-		`[orbit-secure-store] ${error instanceof Error ? error.message : String(error)}`,
-		{ cause: error },
-	);
+	const Failure =
+		(typeof code === "string" ? NATIVE_CODES.get(code) : undefined) ??
+		errors.E_ORBIT_SECURE_STORE_FAILED;
+	return new Failure([error instanceof Error ? error.message : String(error)], {
+		cause: error,
+	});
 }
 
 async function call<T>(run: () => Promise<T>): Promise<T> {

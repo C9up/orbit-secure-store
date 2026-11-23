@@ -45,7 +45,7 @@ await server.restore(); // authorized again if a token was kept
 
 ## Errors
 
-Every failure is an `OrbitSecureStoreError` with a `code`:
+Every failure carries a `code`, and is an instance of the class of that name in the `errors` export (`error instanceof errors.E_ORBIT_SECURE_STORE_AUTH_CANCELLED`):
 
 | Code | Cause |
 |---|---|
