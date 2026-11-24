@@ -30,14 +30,31 @@ import javax.crypto.spec.GCMParameterSpec
  * has a key of its own that only a strong biometric check unlocks, once per
  * use, and that enrolling a new fingerprint invalidates.
  *
+ * A value's file is named `<key>.v`: `android.util.AtomicFile` writes beside
+ * it `<key>.v.new` (and reads a `<key>.v.bak`), names no key's file can take,
+ * so one key never reads, overwrites or deletes another's. The key also goes
+ * into the ciphertext as GCM associated data: a value under another name does
+ * not decrypt. Values written before (named by the bare key, in the legacy
+ * directory) are moved over when they are first read.
+ *
  * Nothing here logs a value, a key's material or a ciphertext.
  */
 class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecureStoreSpec(context) {
     override fun getName(): String = NAME
 
-    private fun dir(): File = File(reactApplicationContext.noBackupFilesDir, "c9up-secure-store").apply { mkdirs() }
+    private fun dir(): File = File(reactApplicationContext.noBackupFilesDir, DIR).apply { mkdirs() }
 
-    private fun file(key: String): AtomicFile = AtomicFile(File(dir(), key))
+    private fun file(key: String): AtomicFile = AtomicFile(File(dir(), fileName(key)))
+
+    /** Where 0.1.0 kept a value: a file named by the bare key (never written now). */
+    private fun legacyFile(key: String): File = File(File(reactApplicationContext.noBackupFilesDir, LEGACY_DIR), key)
+
+    /** Drop a value 0.1.0 kept, and its directory once nothing is left in it. */
+    private fun dropLegacy(key: String) {
+        val legacy = legacyFile(key)
+        if (legacy.isFile) legacy.delete()
+        legacy.parentFile?.delete()
+    }
 
     private fun keyStore(): KeyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
 
@@ -103,8 +120,10 @@ class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecu
             cipher.init(Cipher.ENCRYPT_MODE, secretKey(alias, auth))
             val write = { ready: Cipher ->
                 guarded(promise) {
+                    ready.updateAAD(associated(key))
                     val sealed = ready.doFinal(value.toByteArray(Charsets.UTF_8))
-                    store(key, auth, ready.iv, sealed)
+                    store(key, flags(auth, bound = true), ready.iv, sealed)
+                    dropLegacy(key)
                     promise.resolve(null)
                 }
             }
@@ -115,14 +134,22 @@ class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecu
     override fun getItem(key: String, options: ReadableMap, promise: Promise) {
         if (!validKey(key, promise)) return
         guarded(promise) {
-            val bytes = file(key).let { if (it.baseFile.exists()) it.readFully() else null }
+            val current = file(key).let { if (it.baseFile.exists()) it.readFully() else null }
+            // A value 0.1.0 kept: read once from its old file (as a plain file, so
+            // nothing beside it is renamed or deleted), then moved over.
+            val legacy = legacyFile(key)
+            val migrating = current == null && legacy.isFile
+            val bytes = current ?: if (migrating) legacy.readBytes() else null
             if (bytes == null || bytes.size < 3) {
                 promise.resolve(null)
                 return@guarded
             }
             val auth = bytes[0].toInt() and FLAG_AUTH != 0
+            val bound = bytes[0].toInt() and FLAG_BOUND != 0
             val ivLength = bytes[1].toInt()
-            if (bytes.size < 2 + ivLength) {
+            // Every value this version writes is bound to its key; only a value
+            // protected by its own per-key alias may come unbound from 0.1.0.
+            if (bytes.size < 2 + ivLength || (!bound && !auth && !migrating)) {
                 promise.reject(FAILED, "a stored value is damaged")
                 return@guarded
             }
@@ -133,6 +160,7 @@ class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecu
             if (stored !is SecretKey) {
                 // Its key is gone (the app's data restored without its Keystore): unreadable.
                 file(key).delete()
+                dropLegacy(key)
                 promise.reject(INVALIDATED, "the key that protected this value is gone")
                 return@guarded
             }
@@ -142,10 +170,16 @@ class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecu
             } catch (error: KeyPermanentlyInvalidatedException) {
                 keyStore().deleteEntry(alias)
                 file(key).delete()
+                dropLegacy(key)
                 throw error
             }
             val read = { ready: Cipher ->
-                guarded(promise) { promise.resolve(String(ready.doFinal(sealed), Charsets.UTF_8)) }
+                guarded(promise) {
+                    if (bound) ready.updateAAD(associated(key))
+                    val plain = ready.doFinal(sealed)
+                    if (migrating) migrate(key, auth, bytes, plain)
+                    promise.resolve(String(plain, Charsets.UTF_8))
+                }
             }
             if (auth) authenticate(cipher, options, promise, read) else read(cipher)
         }
@@ -155,6 +189,7 @@ class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecu
         if (!validKey(key, promise)) return
         guarded(promise) {
             file(key).delete()
+            dropLegacy(key)
             keyStore().deleteEntry(alias(key, true))
             promise.resolve(null)
         }
@@ -181,18 +216,43 @@ class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecu
         return false
     }
 
-    private fun store(key: String, auth: Boolean, iv: ByteArray, sealed: ByteArray) {
+    private fun flags(auth: Boolean, bound: Boolean): Int = (if (auth) FLAG_AUTH else 0) or (if (bound) FLAG_BOUND else 0)
+
+    /** The associated data a value is sealed with: its key, so it opens under no other. */
+    private fun associated(key: String): ByteArray = "$ALIAS:$key".toByteArray(Charsets.UTF_8)
+
+    private fun store(key: String, flags: Int, iv: ByteArray, sealed: ByteArray) {
+        write(key, byteArrayOf(flags.toByte(), iv.size.toByte()) + iv + sealed)
+    }
+
+    private fun write(key: String, bytes: ByteArray) {
         val atomic = file(key)
         val out = atomic.startWrite()
         try {
-            out.write(byteArrayOf((if (auth) FLAG_AUTH else 0).toByte(), iv.size.toByte()))
-            out.write(iv)
-            out.write(sealed)
+            out.write(bytes)
             atomic.finishWrite(out)
         } catch (error: Exception) {
             atomic.failWrite(out)
             throw error
         }
+    }
+
+    /**
+     * Move a value 0.1.0 kept to its new file. One under the shared alias is
+     * sealed again, bound to its key; one under its own biometric alias (that
+     * alias already names the key, and sealing again would take a second
+     * biometric check) keeps its bytes.
+     */
+    private fun migrate(key: String, auth: Boolean, bytes: ByteArray, plain: ByteArray) {
+        if (auth) {
+            write(key, bytes)
+        } else {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey(ALIAS, false))
+            cipher.updateAAD(associated(key))
+            store(key, flags(auth = false, bound = true), cipher.iv, cipher.doFinal(plain))
+        }
+        dropLegacy(key)
     }
 
     /** Unlock `cipher` with a biometric prompt, then hand it to `use`. */
@@ -246,6 +306,18 @@ class OrbitSecureStoreModule(context: ReactApplicationContext) : NativeOrbitSecu
         private const val ALIAS = "c9up.orbit.secure-store"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val FLAG_AUTH = 1
+
+        /** The value was sealed with its key as associated data. */
+        private const val FLAG_BOUND = 2
+        private const val DIR = "c9up-secure-store-v2"
+        private const val LEGACY_DIR = "c9up-secure-store"
+
+        /**
+         * A value's file: the key and `.v`. `AtomicFile` keeps `<name>.new` and
+         * `<name>.bak` beside it; those end in `.new` / `.bak`, which no
+         * `<key>.v` does, so no key's file is another key's side file.
+         */
+        fun fileName(key: String): String = "$key.v"
         private val KEY_PATTERN = Regex("^[A-Za-z0-9._-]{1,128}$")
         const val INVALID_KEY = "E_ORBIT_SECURE_STORE_INVALID_KEY"
         const val NO_BIOMETRICS = "E_ORBIT_SECURE_STORE_NO_BIOMETRICS"

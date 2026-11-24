@@ -22,7 +22,9 @@ if ((await biometricStatus()).enrolled) {
   biometric check unlocks, each time, and that enrolling a new fingerprint
   invalidates — the value is then gone (`E_ORBIT_SECURE_STORE_INVALIDATED`).
   A Kotlin TurboModule, added by React Native's autolinking to an app built by
-  `ream android:*`. Nothing logs a value.
+  `ream android:*`. Nothing logs a value. Every key has a value of its own
+  (`token`, `token.bak` and `token.new` never touch one another), sealed with
+  its key so it opens under no other name.
 - **Browser and server**: no equivalent — a browser's storage is readable by
   every script on the page — so every call rejects with
   `E_ORBIT_SECURE_STORE_UNAVAILABLE`, and `biometricStatus()` answers
